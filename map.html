@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Карта экологических проблем — Climate Nearby</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <style>
+    body { font: 16px system-ui, sans-serif; margin: 0; color: #172033; }
+    header { padding: 14px 20px; }
+    h1 { margin: 0 0 6px; font-size: 1.35rem; }
+    p { margin: 0; }
+    #map { height: 65vh; min-height: 360px; }
+    form { display: grid; gap: 10px; max-width: 720px; padding: 18px 20px; }
+    input, select, textarea, button { font: inherit; padding: 9px; }
+    .row { display: flex; gap: 10px; flex-wrap: wrap; }
+    .row label { flex: 1; min-width: 180px; }
+    label { display: grid; gap: 4px; }
+    #message { min-height: 1.4em; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Карта локальных экологических проблем</h1>
+    <p>Сообщения пользователей пока не проверены. Не публикуйте личные данные и не используйте карту для экстренных обращений.</p>
+  </header>
+  <div id="map" aria-label="Карта сообщений"></div>
+  <form id="report-form">
+    <h2>Добавить сообщение</h2>
+    <div class="row">
+      <label>Категория
+        <select name="category">
+          <option>мусор</option><option>загрязнение воздуха</option><option>жара</option><option>другое</option>
+        </select>
+      </label>
+      <label>Широта <input name="latitude" type="number" step="any" min="-90" max="90" required></label>
+      <label>Долгота <input name="longitude" type="number" step="any" min="-180" max="180" required></label>
+    </div>
+    <label>Описание (не указывайте личные данные)
+      <textarea name="description" minlength="5" maxlength="500" required></textarea>
+    </label>
+    <button type="submit">Отправить сообщение</button>
+    <p id="message" role="status"></p>
+  </form>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+    const map = L.map('map').setView([55.75, 37.62], 4);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19, attribution: '&copy; OpenStreetMap contributors'
+    }).addTo(map);
+
+    function addSafePopup(feature, layer) {
+      const props = feature.properties;
+      const content = document.createElement('div');
+      const title = document.createElement('strong');
+      title.textContent = `${props.category} — ${props.status}`;
+      const description = document.createElement('p');
+      description.textContent = props.description;
+      content.append(title, description);
+      layer.bindPopup(content);
+    }
+
+    async function loadProblems() {
+      const response = await fetch('/api/problems');
+      const geojson = await response.json();
+      L.geoJSON(geojson, { onEachFeature: addSafePopup }).addTo(map);
+    }
+    loadProblems().catch(() => { document.getElementById('message').textContent = 'Не удалось загрузить сообщения.'; });
+
+    document.getElementById('report-form').addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const form = event.currentTarget;
+      const values = new FormData(form);
+      const payload = {
+        category: values.get('category'), description: values.get('description'),
+        latitude: Number(values.get('latitude')), longitude: Number(values.get('longitude'))
+      };
+      const message = document.getElementById('message');
+      try {
+        const response = await fetch('/api/problems', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.detail || 'Проверьте введённые данные.');
+        message.textContent = result.message;
+        form.reset();
+        map.eachLayer((layer) => { if (layer instanceof L.GeoJSON) map.removeLayer(layer); });
+        await loadProblems();
+      } catch (error) {
+        message.textContent = error.message || 'Не удалось отправить сообщение.';
+      }
+    });
+  </script>
+</body>
+</html>
